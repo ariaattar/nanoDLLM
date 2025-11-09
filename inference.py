@@ -58,22 +58,18 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
     """
     model.eval()
 
-    # Encode prompt using tiktoken
     prompt_ids = torch.tensor(tokenizer.encode(prompt_text), device=device)
 
     B = 1
     prompt_len = len(prompt_ids)
     T = prompt_len + max_new_tokens
 
-    # Initialize canvas
     x = torch.full((B, T), pad_token_id, dtype=torch.long, device=device)
     x[0, :prompt_len] = prompt_ids
     x[0, prompt_len:] = mask_token_id
 
-    # Attention mask (None for bidirectional attention)
     attention_mask = None
 
-    # Get transfer schedule
     mask_index = x == mask_token_id
     total_masked = mask_index.sum(dim=1)
     schedule = cosine_schedule(steps).to(device)
@@ -83,13 +79,11 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
         transfers = (schedule * total_masked[i]).round().long()
         num_transfer_per_step.append(transfers)
 
-    # Iterative denoising with rich TUI visualization
     if base_vocab_size is None:
         base_vocab_size = tokenizer.n_vocab
 
-    console.print()  # Spacing
+    console.print()
 
-    # Track initial masks for progress calculation
     initial_masks = (x == mask_token_id).sum().item()
 
     with Live(console=console, refresh_per_second=10) as live:
@@ -99,16 +93,12 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
             if not mask_index.any():
                 break
 
-            # Forward pass
             logits = model(x, attention_mask)
 
-            # AR-shift for next-token prediction alignment
             logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
 
-            # Get logits for masked positions
             mask_logits = logits[mask_index]
 
-            # Sample tokens with temperature and top-k
             if temperature > 0 and top_k > 0:
                 mask_logits = mask_logits / temperature
                 top_k_logits, top_k_indices = torch.topk(mask_logits, min(top_k, mask_logits.size(-1)))
@@ -122,11 +112,9 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
                 probs = torch.nn.functional.softmax(mask_logits, dim=-1)
                 confidence, sampled_tokens = probs.max(dim=-1)
 
-            # Scatter confidence back to full sequence
             full_confidence = torch.full_like(x, float('-inf'), dtype=torch.float)
             full_confidence[mask_index] = confidence
 
-            # Commit tokens for each sequence based on schedule
             for i in range(B):
                 num_to_transfer = num_transfer_per_step[i][step].item()
                 if num_to_transfer > 0 and mask_index[i].any():
@@ -138,45 +126,36 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
 
                     x[i, transfer_indices] = x_new[transfer_indices]
 
-            # Build rich Text object with color coding
             current_ids = x[0].cpu().tolist()
             rich_text = Text()
 
-            # Decode tokens and build colored text
             current_group = []
 
             for tid in current_ids:
                 if tid == pad_token_id:
-                    continue  # Skip padding
+                    continue
                 elif tid == mask_token_id:
-                    # Decode accumulated tokens before adding mask
                     if current_group:
                         decoded = tokenizer.decode(current_group)
                         rich_text.append(decoded, style="green")
                         current_group = []
-                    # Add masked token in dim style
                     rich_text.append("█", style="dim white")
                 elif tid < base_vocab_size:
-                    # Accumulate valid tokens
                     current_group.append(tid)
                 else:
-                    # Unknown token
                     if current_group:
                         decoded = tokenizer.decode(current_group)
                         rich_text.append(decoded, style="green")
                         current_group = []
                     rich_text.append("?", style="red")
 
-            # Decode any remaining tokens
             if current_group:
                 decoded = tokenizer.decode(current_group)
                 rich_text.append(decoded, style="green")
 
-            # Calculate progress
             remaining_masks = mask_index.sum().item()
             progress_pct = 100 * (1 - remaining_masks / max(1, initial_masks))
 
-            # Create display panel
             panel = Panel(
                 rich_text,
                 title=f"[cyan]Step {step+1}/{steps}[/cyan]",
@@ -203,7 +182,6 @@ def load_model(model_path='final_dream_model.safetensors', config_path='dream_co
             "Please train the model first using dllm.py"
         )
 
-    # Check if this is an old config format
     if 'stoi' in config or 'itos' in config:
         raise ValueError(
             "This config file uses the old character-level encoding format.\n"
@@ -211,7 +189,6 @@ def load_model(model_path='final_dream_model.safetensors', config_path='dream_co
             "Run: python dllm.py"
         )
 
-    # Validate required fields
     required_fields = ['vocab_size', 'base_vocab_size', 'hidden_size', 'num_layers',
                        'num_heads', 'mask_token_id', 'pad_token_id']
     missing_fields = [f for f in required_fields if f not in config]
@@ -221,7 +198,6 @@ def load_model(model_path='final_dream_model.safetensors', config_path='dream_co
             "Please retrain your model using the updated dllm.py"
         )
 
-    # Load tiktoken tokenizer
     tokenizer_name = config.get('tokenizer_name', 'gpt2')
     console.print(f"[dim]Loading tokenizer: {tokenizer_name}...[/dim]")
     tokenizer = tiktoken.get_encoding(tokenizer_name)
@@ -278,7 +254,6 @@ def interactive_mode(model, config, tokenizer, device='cpu'):
                 console.print("[dim]Goodbye![/dim]")
                 break
 
-            # Handle commands
             if prompt.startswith('/temp '):
                 temperature = float(prompt.split()[1])
                 console.print(f"[green]Temperature set to {temperature}[/green]")
@@ -313,10 +288,8 @@ def interactive_mode(model, config, tokenizer, device='cpu'):
                 base_vocab_size=config['base_vocab_size']
             )
 
-            # Decode final result using tiktoken
             generated_ids = generated[0].cpu().tolist()
             base_vocab_size = config['base_vocab_size']
-            # Filter out special tokens
             generated_ids = [id for id in generated_ids if id != config['pad_token_id'] and id < base_vocab_size]
             decoded = tokenizer.decode(generated_ids) if generated_ids else ""
 
@@ -348,7 +321,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Determine device
     if args.device:
         device = args.device
     else:
@@ -361,12 +333,9 @@ def main():
 
     console.print(f"[dim]Using device: {device}[/dim]")
 
-    # Load model
     model, config, tokenizer = load_model(args.model, args.config, device)
 
-    # Generate
     if args.prompt:
-        # Single generation
         console.print(f"\n[cyan]>[/cyan] {args.prompt}")
 
         generated = generate(
@@ -383,7 +352,6 @@ def main():
             base_vocab_size=config['base_vocab_size']
         )
 
-        # Decode using tiktoken
         generated_ids = generated[0].cpu().tolist()
         base_vocab_size = config['base_vocab_size']
         generated_ids = [id for id in generated_ids if id != config['pad_token_id'] and id < base_vocab_size]
@@ -391,7 +359,6 @@ def main():
 
         console.print(f"[bold]{decoded}[/bold]\n")
     else:
-        # Interactive mode
         interactive_mode(model, config, tokenizer, device)
 
 if __name__ == "__main__":

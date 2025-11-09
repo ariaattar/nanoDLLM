@@ -70,9 +70,7 @@ def load_dataset(block_size, batch_size, mask_token_id, tokenizer_name='gpt2'):
 
     return train_loader, val_loader, train_dataset, vocab_size, tokenizer
 
-# ============================================================================
-# RMSNorm - simpler than LayerNorm, no mean centering
-# ============================================================================
+
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         super().__init__()
@@ -87,9 +85,7 @@ class RMSNorm(nn.Module):
         x = x * torch.rsqrt(variance + self.eps)
         return self.weight * x.to(input_dtype)
 
-# ============================================================================
-# Rotary Position Embeddings (RoPE)
-# ============================================================================
+
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000):
         super().__init__()
@@ -123,9 +119,7 @@ def apply_rotary_pos_emb(q, k, cos, sin):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
-# ============================================================================
-# Gated MLP (SwiGLU-style) - same as Llama
-# ============================================================================
+
 class DreamMLP(nn.Module):
     def __init__(self, hidden_size, intermediate_size):
         super().__init__()
@@ -137,9 +131,7 @@ class DreamMLP(nn.Module):
         # SwiGLU: silu(gate) * up
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
 
-# ============================================================================
-# Bidirectional Attention with Grouped Query Attention
-# ============================================================================
+
 class DreamAttention(nn.Module):
     def __init__(self, hidden_size, num_heads, num_key_value_heads, dropout=0.0):
         super().__init__()
@@ -192,9 +184,7 @@ class DreamAttention(nn.Module):
         attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, C)
         return self.o_proj(attn_output)
 
-# ============================================================================
-# Dream Transformer Block
-# ============================================================================
+
 class DreamBlock(nn.Module):
     def __init__(self, hidden_size, num_heads, num_key_value_heads, intermediate_size, dropout=0.0, rms_norm_eps=1e-6):
         super().__init__()
@@ -218,9 +208,7 @@ class DreamBlock(nn.Module):
 
         return x
 
-# ============================================================================
-# Dream Model - Masked Diffusion Language Model
-# ============================================================================
+
 class Dream(nn.Module):
     def __init__(self, vocab_size, hidden_size=512, num_layers=6, num_heads=8,
                  num_key_value_heads=8, intermediate_size=2048, dropout=0.0,
@@ -260,9 +248,6 @@ class Dream(nn.Module):
 
         return logits
 
-# ============================================================================
-# Masked Diffusion Training
-# ============================================================================
 def create_masking_schedule(batch_size, seq_len, device):
     """Sample masking ratio from uniform distribution."""
     # Sample t ~ Uniform(0, 1) for each sequence
@@ -356,9 +341,7 @@ def train_step(model, input_ids, mask_token_id, use_cart_weights=True):
 
     return loss
 
-# ============================================================================
-# Iterative Denoising Generation
-# ============================================================================
+
 def cosine_schedule(steps):
     """Cosine schedule for determining how many tokens to unmask per step."""
     # Alpha schedule from MaskGIT/Dream
@@ -428,8 +411,7 @@ def generate(model, prompts, mask_token_id, eos_token_id, max_new_tokens=50,
 
     # Iterative denoising
     if tokenizer is not None:
-        print(f"\n\033[1m🌀 Denoising ({steps} steps)\033[0m")
-        print("─" * 80)
+        print(f"\n  Starting denoising ({steps} steps)...")
 
     for step in range(steps):
         mask_index = x == mask_token_id
@@ -501,8 +483,7 @@ def generate(model, prompts, mask_token_id, eos_token_id, max_new_tokens=50,
                     if current_group:
                         decoded_parts.append(tokenizer.decode(current_group))
                         current_group = []
-                    # Use dim gray color for masks
-                    decoded_parts.append('\033[2m▒\033[0m')
+                    decoded_parts.append('[MASK]')
                 elif tid < base_vocab_size:
                     # Accumulate valid tokens
                     current_group.append(tid)
@@ -520,32 +501,17 @@ def generate(model, prompts, mask_token_id, eos_token_id, max_new_tokens=50,
             decoded_text = ''.join(decoded_parts)
             remaining_masks = mask_index.sum().item()
 
-            # Calculate progress percentage
-            total_masks = (x[0] == mask_token_id).sum().item() if step == 0 else getattr(generate, '_initial_masks', remaining_masks)
-            if step == 0:
-                generate._initial_masks = remaining_masks
-            progress = 100 * (1 - remaining_masks / max(1, generate._initial_masks))
-
-            # Progress bar
-            bar_width = 20
-            filled = int(bar_width * progress / 100)
-            bar = '█' * filled + '░' * (bar_width - filled)
-
-            # Clear line and print with progress bar
-            print(f"\r\033[K\033[36m{bar}\033[0m {progress:5.1f}% │ {decoded_text[:60]}",
+            # Print on same line with carriage return
+            print(f"\r  Step {step:3d}/{steps}: {decoded_text[:80]:<80} ({remaining_masks} masks)",
                   end='', flush=True)
 
-    # Print completion message
+    # Print newline after generation completes
     if tokenizer is not None:
-        # Clear the progress line and show completion
-        print(f"\r\033[K\033[32m{'█' * 20}\033[0m 100.0% │ \033[1m✓ Complete\033[0m")
-        print("─" * 80)
+        print()  # Move to next line
 
     return x
 
-# ============================================================================
-# Training Loop
-# ============================================================================
+
 def train(model, train_loader, val_loader, optimizer, mask_token_id, num_epochs=3,
           max_steps=None, eval_interval=100, use_cart_weights=True):
     best_val_loss = float('inf')
@@ -685,18 +651,18 @@ def train(model, train_loader, val_loader, optimizer, mask_token_id, num_epochs=
     return model
 
 def main(
-    hidden_size=512,
-    num_layers=8,
-    num_heads=8,
-    num_key_value_heads=8,
-    intermediate_size=2048,
+    hidden_size=1024,
+    num_layers=16,
+    num_heads=16,
+    num_key_value_heads=16,
+    intermediate_size=4096,
     block_size=256,
     batch_size=16,
     learning_rate=3e-4,
     dropout=0.0,
     rms_norm_eps=1e-6,
     num_epochs=3,
-    max_steps=1000,
+    max_steps=2000,
     use_checkpoint=False,
     use_cart_weights=True,
     seed=42
@@ -796,10 +762,9 @@ def main(
     generated_ids = [id for id in generated_ids if id != pad_token_id and id < base_vocab_size]
     # Decode using tiktoken
     decoded = tokenizer.decode(generated_ids) if generated_ids else ""
-    print(f"\n\033[1m📝 Final Result\033[0m")
-    print(f"{'─'*80}")
-    print(f"\033[36mPrompt:\033[0m {prompt_text}")
-    print(f"\033[32mGenerated:\033[0m {decoded}")
+    print(f"\n{'─'*80}")
+    print(f"Prompt: '{prompt_text}'")
+    print(f"Generated: '{decoded}'")
     print(f"{'─'*80}\n")
 
     # Save config for inference

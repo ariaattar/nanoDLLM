@@ -14,7 +14,6 @@ from rich.text import Text
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
-# Import all model classes from dllm.py
 from dllm import (
     Dream,
     RMSNorm,
@@ -28,9 +27,6 @@ from dllm import (
 
 console = Console()
 
-# ============================================================================
-# Generation utilities
-# ============================================================================
 
 def cosine_schedule(steps):
     """Cosine schedule for determining how many tokens to unmask per step."""
@@ -194,10 +190,6 @@ def generate(model, prompt_text, tokenizer, mask_token_id, pad_token_id,
     console.print()
 
     return x
-
-# ============================================================================
-# Model loading and inference
-# ============================================================================
 
 def load_model(model_path='final_dream_model.safetensors', config_path='dream_config.pt', device='cpu'):
     """Load trained model and config."""

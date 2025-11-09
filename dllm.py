@@ -784,14 +784,7 @@ def main(
         'tokenizer_name': 'gpt2',  # Save tokenizer name instead of vocab dicts
     }
     torch.save(config, 'dream_config.pt')
-    print("✓ Model config saved to 'dream_config.pt'")
 
-    print("\n" + "="*80)
-    print("All done! You can now run inference with:")
-    print("  python dream_inference.py")
-    print("="*80 + "\n")
-
-    return model
 
 if __name__ == "__main__":
     main()
